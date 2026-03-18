@@ -15,7 +15,7 @@ from playwright.async_api import (
     async_playwright,
 )
 
-from telemost_record.config import Settings
+from telemost_recorder.config import Settings
 
 
 class BrowserAutomationError(RuntimeError):
@@ -25,7 +25,7 @@ class BrowserAutomationError(RuntimeError):
 class TelemostBrowserSession:
     def __init__(self, settings: Settings, browser_env: dict[str, str] | None = None) -> None:
         self.settings = settings
-        self.logger = logging.getLogger("telemost_record.browser")
+        self.logger = logging.getLogger("telemost_recorder.browser")
         self._playwright: Playwright | None = None
         self._context: BrowserContext | None = None
         self._page: Page | None = None

@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     display_name: str
     schedule: str
     recordings_dir: Path
-    audio_backend: Literal["pulse", "alsa"]
+    audio_backend: Literal["pulse"]
     audio_sink_name: str = Field(min_length=1)
     window_size: str
     window_position: str

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import shutil
 import signal
 from datetime import datetime
@@ -10,10 +11,10 @@ from pathlib import Path
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from telemost_record.browser import TelemostBrowserSession
-from telemost_record.config import Settings
-from telemost_record.pulse_audio import ChromiumAudioSink
-from telemost_record.recording import (
+from telemost_recorder.browser import TelemostBrowserSession
+from telemost_recorder.config import Settings
+from telemost_recorder.pulse_audio import ChromiumAudioSink
+from telemost_recorder.recording import (
     FfmpegRecorder,
     RecordingError,
     run_preflight_capture,
@@ -23,7 +24,7 @@ from telemost_record.recording import (
 class TelemostService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.logger = logging.getLogger("telemost_record.service")
+        self.logger = logging.getLogger("telemost_recorder.service")
         self._recording_lock = asyncio.Lock()
         self._shutdown_event = asyncio.Event()
         self._active_session_done = asyncio.Event()
@@ -61,10 +62,13 @@ class TelemostService:
         self.settings.recordings_dir_resolved.mkdir(parents=True, exist_ok=True)
         self.settings.chromium_profile_dir_resolved.mkdir(parents=True, exist_ok=True)
         audio_sink = ChromiumAudioSink(self.settings)
+        browser = TelemostBrowserSession(self.settings, browser_env=audio_sink.browser_env)
         try:
             await audio_sink.start()
             await run_preflight_capture(self.settings, audio_sink.monitor_source)
+            await browser.start()
         finally:
+            await browser.close()
             await audio_sink.close()
         self.logger.info("preflight_ok")
 
@@ -127,8 +131,10 @@ class TelemostService:
         _ = self.settings.window_height
         _ = self.settings.window_x
         _ = self.settings.window_y
-        if not self.settings.chromium_path.exists():
+        if not self.settings.chromium_path.is_file():
             raise FileNotFoundError(f"chromium not found: {self.settings.chromium_path}")
+        if not os.access(self.settings.chromium_path, os.X_OK):
+            raise PermissionError(f"chromium is not executable: {self.settings.chromium_path}")
         if shutil.which("ffmpeg") is None:
             raise FileNotFoundError("ffmpeg binary is not available in PATH")
         if shutil.which("pactl") is None:

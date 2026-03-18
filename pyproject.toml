@@ -1,5 +1,5 @@
 [project]
-name = "telemost-record"
+name = "telemost-recorder"
 version = "0.1.0"
 description = "Scheduled Yandex Telemost recorder powered by Chromium, Playwright, and ffmpeg"
 readme = "README.md"
@@ -11,7 +11,7 @@ dependencies = [
 ]
 
 [project.scripts]
-telemost-record = "telemost_record.cli:main"
+telemost-recorder = "telemost_recorder.cli:main"
 
 [build-system]
 requires = ["hatchling"]

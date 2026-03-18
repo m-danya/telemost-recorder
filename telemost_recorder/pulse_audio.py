@@ -6,7 +6,7 @@ import os
 import shutil
 import uuid
 
-from telemost_record.config import Settings
+from telemost_recorder.config import Settings
 
 
 class PulseAudioError(RuntimeError):
@@ -16,7 +16,7 @@ class PulseAudioError(RuntimeError):
 class ChromiumAudioSink:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.logger = logging.getLogger("telemost_record.pulse_audio")
+        self.logger = logging.getLogger("telemost_recorder.pulse_audio")
         suffix = uuid.uuid4().hex[:8]
         self.sink_name = f"{self.settings.audio_sink_name}_{suffix}"
         self._module_id: int | None = None

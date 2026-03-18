@@ -6,9 +6,9 @@ import logging
 
 from pydantic import ValidationError
 
-from telemost_record.config import Settings
-from telemost_record.logging_utils import setup_logging
-from telemost_record.service import TelemostService
+from telemost_recorder.config import Settings
+from telemost_recorder.logging_utils import setup_logging
+from telemost_recorder.service import TelemostService
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -32,7 +32,7 @@ async def _async_main() -> int:
     parser = build_parser()
     args = parser.parse_args()
     setup_logging()
-    logger = logging.getLogger("telemost_record")
+    logger = logging.getLogger("telemost_recorder")
 
     try:
         settings = Settings()

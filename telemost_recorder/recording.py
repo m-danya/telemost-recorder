@@ -3,23 +3,37 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
 import signal
 import shutil
 import time
 from pathlib import Path
 
-from telemost_record.config import Settings
+from telemost_recorder.config import Settings
 
 
 class RecordingError(RuntimeError):
     pass
 
 
+FFMPEG_LOGLEVEL_PRIORITY = {
+    "panic": 0,
+    "fatal": 0,
+    "error": 0,
+    "warning": 1,
+    "info": 2,
+    "verbose": 3,
+    "debug": 4,
+    "trace": 5,
+}
+FFMPEG_STDERR_LEVEL_RE = re.compile(r"^\[(?P<level>[a-z]+)\]\s*(?P<message>.*)$")
+
+
 class FfmpegRecorder:
     def __init__(self, settings: Settings, audio_source: str) -> None:
         self.settings = settings
         self.audio_source = audio_source
-        self.logger = logging.getLogger("telemost_record.recording")
+        self.logger = logging.getLogger("telemost_recorder.recording")
         self._process: asyncio.subprocess.Process | None = None
         self._stderr_task: asyncio.Task[None] | None = None
         self._silence_started_at: float | None = None
@@ -89,21 +103,24 @@ class FfmpegRecorder:
             if not line:
                 return
             text = line.decode("utf-8", errors="replace").strip()
-            if "silence_start:" in text:
+            level_name, message = self._parse_ffmpeg_stderr_line(text)
+            if "silence_start:" in message:
                 self._silence_started_at = time.monotonic()
                 continue
-            if "silence_end:" in text:
+            if "silence_end:" in message:
                 self._silence_started_at = None
                 continue
-            if text:
-                self.logger.info("ffmpeg %s", text)
+            if message and self._should_log_ffmpeg_line(level_name):
+                self._log_ffmpeg_line(level_name, message)
 
     def _build_record_command(self, output_path: Path) -> list[str]:
         return [
             "ffmpeg",
+            "-hide_banner",
+            "-nostats",
             "-y",
             "-loglevel",
-            self.settings.ffmpeg_loglevel,
+            "repeat+level+info",
             "-thread_queue_size",
             "1024",
             *self._audio_input_args(),
@@ -128,6 +145,26 @@ class FfmpegRecorder:
             "-i",
             self.audio_source,
         ]
+
+    def _parse_ffmpeg_stderr_line(self, text: str) -> tuple[str, str]:
+        match = FFMPEG_STDERR_LEVEL_RE.match(text)
+        if match is None:
+            return "info", text
+        return match.group("level"), match.group("message").strip()
+
+    def _should_log_ffmpeg_line(self, level_name: str) -> bool:
+        threshold = FFMPEG_LOGLEVEL_PRIORITY[self.settings.ffmpeg_loglevel]
+        current = FFMPEG_LOGLEVEL_PRIORITY.get(level_name, FFMPEG_LOGLEVEL_PRIORITY["info"])
+        return current <= threshold
+
+    def _log_ffmpeg_line(self, level_name: str, message: str) -> None:
+        if level_name in {"panic", "fatal", "error"}:
+            self.logger.error("ffmpeg %s", message)
+            return
+        if level_name == "warning":
+            self.logger.warning("ffmpeg %s", message)
+            return
+        self.logger.info("ffmpeg %s", message)
 
     def _require_process(self) -> asyncio.subprocess.Process:
         if self._process is None:
@@ -163,7 +200,7 @@ class FfmpegRecorder:
 
 
 async def run_preflight_capture(settings: Settings, audio_source: str) -> None:
-    logger = logging.getLogger("telemost_record.recording")
+    logger = logging.getLogger("telemost_recorder.recording")
     if shutil.which("ffmpeg") is None:
         raise RecordingError("ffmpeg binary is not available in PATH")
 

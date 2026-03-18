@@ -180,7 +180,7 @@ wheels = [
 ]
 
 [[package]]
-name = "telemost-record"
+name = "telemost-recorder"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

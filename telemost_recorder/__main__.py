@@ -1,4 +1,4 @@
-from telemost_record.cli import main
+from telemost_recorder.cli import main
 
 
 if __name__ == "__main__":

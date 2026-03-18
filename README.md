@@ -1,4 +1,4 @@
-# telemost-record
+# telemost-recorder
 
 Сервис на Python для автоматического входа во встречи Яндекс.Телемоста через `chromium-browser` и аудиозаписи встречи по ежедневному расписанию из конфигурации.
 
@@ -61,7 +61,7 @@ uv sync
 Одноразовый немедленный запуск записи:
 
 ```bash
-uv run telemost-record once --start-now
+uv run telemost-recorder once --start-now
 
 # или ./start-once-now.sh
 ```
@@ -71,7 +71,7 @@ uv run telemost-record once --start-now
 Долгоживущий сервис с использованием расписания:
 
 ```bash
-uv run telemost-record run
+uv run telemost-recorder run
 
 # или ./start-monitoring.sh
 ```
@@ -84,7 +84,7 @@ uv run telemost-record run
 - `TELEMOST_DISPLAY_NAME`
 - `TELEMOST_SCHEDULE` — ежедневное расписание в формате `HH:MM,HH:MM`
 - `TELEMOST_RECORDINGS_DIR`
-- `TELEMOST_AUDIO_BACKEND` — должен быть `pulse`
+- `TELEMOST_AUDIO_BACKEND` — только `pulse`
 - `TELEMOST_AUDIO_SINK_NAME` — префикс для временного sink, в который будет направлен Chromium
 - `TELEMOST_WINDOW_SIZE` — размер окна Chromium для стабильной автоматизации
 - `TELEMOST_WINDOW_POSITION` — положение окна Chromium
@@ -96,7 +96,7 @@ uv run telemost-record run
 - `TELEMOST_BROWSER_LAUNCH_TIMEOUT_SECONDS`
 - `TELEMOST_JOIN_TIMEOUT_SECONDS`
 - `TELEMOST_POST_JOIN_DELAY_SECONDS`
-- `TELEMOST_FFMPEG_LOGLEVEL` — `error`, `warning` или `info`
+- `TELEMOST_FFMPEG_LOGLEVEL` — `error`, `warning` или `info`; влияет на то, какие сообщения `ffmpeg` попадут в логи сервиса
 
 ## Замечания
 

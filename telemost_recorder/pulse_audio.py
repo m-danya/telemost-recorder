@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import shlex
 import shutil
 import uuid
 
@@ -14,6 +15,9 @@ class PulseAudioError(RuntimeError):
 
 
 class ChromiumAudioSink:
+    _PACTL_RETRY_ATTEMPTS = 3
+    _PACTL_RETRY_DELAY_SECONDS = 0.5
+
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.logger = logging.getLogger("telemost_recorder.pulse_audio")
@@ -48,7 +52,7 @@ class ChromiumAudioSink:
             self._module_id = None
 
     async def _load_null_sink(self) -> int:
-        output = await self._run_pactl(
+        output = await self._run_pactl_with_retries(
             "load-module",
             "module-null-sink",
             f"sink_name={self.sink_name}",
@@ -62,7 +66,7 @@ class ChromiumAudioSink:
     async def _wait_for_monitor_source(self) -> None:
         deadline = asyncio.get_running_loop().time() + 5
         while True:
-            sources = await self._run_pactl("list", "short", "sources")
+            sources = await self._run_pactl_with_retries("list", "short", "sources")
             for line in sources.splitlines():
                 columns = line.split("\t")
                 if len(columns) >= 2 and columns[1] == self.monitor_source:
@@ -82,9 +86,33 @@ class ChromiumAudioSink:
         )
         stdout, stderr = await process.communicate()
         if process.returncode != 0:
-            message = stderr.decode("utf-8", errors="replace").strip()
-            raise PulseAudioError(f"pactl {' '.join(args)} failed: {message}")
+            stdout_message = stdout.decode("utf-8", errors="replace").strip()
+            stderr_message = stderr.decode("utf-8", errors="replace").strip()
+            detail = stderr_message or stdout_message or "unknown error"
+            command = " ".join(shlex.quote(arg) for arg in args)
+            raise PulseAudioError(
+                f"pactl {command} failed with exit code {process.returncode}: {detail}"
+            )
         return stdout.decode("utf-8", errors="replace")
+
+    async def _run_pactl_with_retries(self, *args: str) -> str:
+        last_error: PulseAudioError | None = None
+        for attempt in range(1, self._PACTL_RETRY_ATTEMPTS + 1):
+            try:
+                return await self._run_pactl(*args)
+            except PulseAudioError as exc:
+                last_error = exc
+                if attempt >= self._PACTL_RETRY_ATTEMPTS:
+                    break
+                self.logger.warning(
+                    "pactl_retry attempt=%s command=%s error=%s",
+                    attempt,
+                    " ".join(shlex.quote(arg) for arg in args),
+                    exc,
+                )
+                await asyncio.sleep(self._PACTL_RETRY_DELAY_SECONDS * attempt)
+        assert last_error is not None
+        raise last_error
 
     def _validate_requirements(self) -> None:
         if self.settings.audio_backend != "pulse":

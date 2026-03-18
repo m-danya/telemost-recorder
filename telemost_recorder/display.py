@@ -102,7 +102,12 @@ class VirtualDisplaySession:
         prepared_env = browser_env.copy()
         prepared_env["DISPLAY"] = display
         prepared_env["XDG_SESSION_TYPE"] = "x11"
+        prepared_env["GDK_BACKEND"] = "x11"
         prepared_env["OZONE_PLATFORM"] = "x11"
+        prepared_env["OZONE_PLATFORM_HINT"] = "x11"
+        prepared_env["QT_QPA_PLATFORM"] = "xcb"
+        prepared_env["SDL_VIDEODRIVER"] = "x11"
+        prepared_env["CLUTTER_BACKEND"] = "x11"
         prepared_env.pop("WAYLAND_DISPLAY", None)
         prepared_env.pop("WAYLAND_SOCKET", None)
         return prepared_env

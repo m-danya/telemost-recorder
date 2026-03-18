@@ -37,9 +37,10 @@ class TelemostBrowserSession:
         self.settings.chromium_profile_dir_resolved.mkdir(parents=True, exist_ok=True)
         self._playwright = await async_playwright().start()
         browser_env = await self._display.prepare_env(self._browser_env)
+        executable_path = self._resolve_chromium_executable_path()
         self._context = await self._playwright.chromium.launch_persistent_context(
             user_data_dir=str(self.settings.chromium_profile_dir_resolved),
-            executable_path=str(self.settings.chromium_path),
+            executable_path=executable_path,
             headless=False,
             viewport=None,
             handle_sigint=False,
@@ -54,10 +55,11 @@ class TelemostBrowserSession:
         await self._context.grant_permissions(["camera", "microphone"], origin=origin)
         self._page = self._context.pages[0] if self._context.pages else await self._context.new_page()
         self.logger.info(
-            "browser_started headless=false display=%s window=%sx%s",
+            "browser_started headless=false display=%s window=%sx%s executable=%s",
             browser_env.get("DISPLAY", "<none>"),
             self.settings.window_width,
             self.settings.window_height,
+            executable_path,
         )
 
     async def join_meeting(self) -> None:
@@ -95,6 +97,8 @@ class TelemostBrowserSession:
         return [
             f"--window-size={self.settings.window_width},{self.settings.window_height}",
             "--ozone-platform=x11",
+            "--ozone-platform-hint=x11",
+            "--disable-gpu",
             "--disable-notifications",
             "--autoplay-policy=no-user-gesture-required",
             "--disable-default-apps",
@@ -104,6 +108,27 @@ class TelemostBrowserSession:
             "--password-store=basic",
             "--use-fake-ui-for-media-stream",
         ]
+
+    def _resolve_chromium_executable_path(self) -> str:
+        configured_path = self.settings.chromium_path.expanduser().resolve()
+        if configured_path.suffix != ".sh":
+            return str(configured_path)
+        try:
+            with configured_path.open("rb") as file:
+                if file.read(2) != b"#!":
+                    return str(configured_path)
+        except OSError:
+            return str(configured_path)
+
+        direct_binary = configured_path.with_suffix("")
+        if direct_binary.is_file() and os.access(direct_binary, os.X_OK):
+            self.logger.info(
+                "chromium_wrapper_resolved wrapper=%s executable=%s",
+                configured_path,
+                direct_binary,
+            )
+            return str(direct_binary)
+        return str(configured_path)
 
     async def _wait_for_page_settle(self) -> None:
         page = self.page

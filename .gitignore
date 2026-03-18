@@ -1,0 +1,6 @@
+.env
+.venv/
+.telemost-profile/
+__pycache__/
+*.pyc
+recordings/

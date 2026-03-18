@@ -9,6 +9,7 @@ LOCAL_BIN_DIR="$HOME/.local/bin"
 UNIT_PATH="$SYSTEMD_USER_DIR/$SERVICE_NAME"
 LAUNCHER_PATH="$LOCAL_BIN_DIR/telemost-recorder-monitoring-service"
 TRIGGER_PATH="$LOCAL_BIN_DIR/telemost-recorder-trigger"
+RUNNER_PATH="$PROJECT_DIR/.venv/bin/telemost-recorder"
 
 require_command() {
     local command_name="$1"
@@ -19,27 +20,23 @@ require_command() {
 }
 
 write_launcher() {
-    local uv_bin="$1"
-
     {
         printf '%s\n' '#!/usr/bin/env bash'
         printf '%s\n' 'set -euo pipefail'
         printf 'export PATH=%q\n' "$PATH"
         printf 'cd -- %q\n' "$CALLER_DIR"
-        printf 'exec %q run --project %q telemost-recorder run\n' "$uv_bin" "$PROJECT_DIR"
+        printf 'exec %q run\n' "$RUNNER_PATH"
     } > "$LAUNCHER_PATH"
 
     chmod 0755 "$LAUNCHER_PATH"
 }
 
 write_trigger_launcher() {
-    local uv_bin="$1"
-
     {
         printf '%s\n' '#!/usr/bin/env bash'
         printf '%s\n' 'set -euo pipefail'
         printf 'export PATH=%q\n' "$PATH"
-        printf 'exec %q run --project %q telemost-recorder trigger\n' "$uv_bin" "$PROJECT_DIR"
+        printf 'exec %q trigger\n' "$RUNNER_PATH"
     } > "$TRIGGER_PATH"
 
     chmod 0755 "$TRIGGER_PATH"
@@ -51,7 +48,7 @@ write_unit() {
         printf '%s\n' 'Description=Telemost Recorder monitoring service'
         printf '%s\n' 'After=default.target'
         printf '\n%s\n' '[Service]'
-        printf '%s\n' 'Type=simple'
+        printf '%s\n' 'Type=exec'
         printf '%s\n' 'Restart=always'
         printf '%s\n' 'RestartSec=10'
         printf '%s\n' 'SyslogIdentifier=telemost-recorder-monitoring'
@@ -62,13 +59,16 @@ write_unit() {
 }
 
 require_command systemctl
-require_command uv
 
 mkdir -p "$SYSTEMD_USER_DIR" "$LOCAL_BIN_DIR"
+if [[ ! -x "$RUNNER_PATH" ]]; then
+    echo "missing runner: $RUNNER_PATH" >&2
+    echo "run uv sync first" >&2
+    exit 1
+fi
 
-UV_BIN="$(command -v uv)"
-write_launcher "$UV_BIN"
-write_trigger_launcher "$UV_BIN"
+write_launcher
+write_trigger_launcher
 write_unit
 
 systemctl --user daemon-reload

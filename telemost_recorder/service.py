@@ -33,6 +33,7 @@ class TelemostService:
         self._active_session_done.set()
         self._signal_handlers_installed = False
         self._manual_trigger_enabled = False
+        self._manual_trigger_pending = False
         self._session_requested = False
         self._background_tasks: set[asyncio.Task[None]] = set()
 
@@ -53,11 +54,13 @@ class TelemostService:
         scheduler.start()
         self._manual_trigger_enabled = True
         self.logger.info("scheduler_started schedule=%s", self.settings.schedule)
+        self._replay_pending_manual_trigger()
         try:
             await self._shutdown_event.wait()
             self.logger.info("shutdown_requested")
         finally:
             self._manual_trigger_enabled = False
+            self._manual_trigger_pending = False
             scheduler.shutdown(wait=False)
             await self._wait_for_active_session_to_finish()
             await self._wait_for_background_tasks()
@@ -176,13 +179,25 @@ class TelemostService:
         self._signal_handlers_installed = True
 
     def _handle_manual_trigger_signal(self) -> None:
-        if not self._manual_trigger_enabled:
-            self.logger.info("manual_trigger_ignored reason=service_not_ready")
-            return
         if self._shutdown_event.is_set():
             self.logger.info("manual_trigger_skipped reason=shutdown_requested")
             return
-        self.logger.info("manual_trigger_received")
+        if not self._manual_trigger_enabled:
+            self._manual_trigger_pending = True
+            self.logger.info("manual_trigger_queued reason=service_not_ready")
+            return
+        self._dispatch_manual_trigger(source="signal")
+
+    def _replay_pending_manual_trigger(self) -> None:
+        if not self._manual_trigger_pending:
+            return
+        if not self._manual_trigger_enabled or self._shutdown_event.is_set():
+            return
+        self._manual_trigger_pending = False
+        self._dispatch_manual_trigger(source="queued")
+
+    def _dispatch_manual_trigger(self, *, source: str) -> None:
+        self.logger.info("manual_trigger_received source=%s", source)
         task = asyncio.create_task(self._request_session(trigger="manual"))
         self._background_tasks.add(task)
         task.add_done_callback(self._background_tasks.discard)

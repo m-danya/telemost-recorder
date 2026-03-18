@@ -38,7 +38,6 @@ class Settings(BaseSettings):
     chromium_profile_dir: Path = Path(".telemost-recorder-profile")
     browser_launch_timeout_seconds: int = 60
     join_timeout_seconds: int = 90
-    post_join_delay_seconds: int = 5
     ffmpeg_loglevel: Literal["error", "warning", "info"] = "info"
 
     @field_validator("audio_sink_name")

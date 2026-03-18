@@ -129,7 +129,6 @@ telemost-recorder-trigger
 - `TELEMOST_CHROMIUM_PROFILE_DIR`
 - `TELEMOST_BROWSER_LAUNCH_TIMEOUT_SECONDS`
 - `TELEMOST_JOIN_TIMEOUT_SECONDS`
-- `TELEMOST_POST_JOIN_DELAY_SECONDS`
 - `TELEMOST_FFMPEG_LOGLEVEL` — `error`, `warning` или `info`; влияет на то, какие сообщения `ffmpeg` попадут в логи сервиса
 
 ## Замечания

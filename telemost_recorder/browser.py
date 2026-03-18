@@ -72,7 +72,6 @@ class TelemostBrowserSession:
         await self._ensure_media_disabled_before_join()
         await self._click_connect()
         await self._wait_for_join_confirmation()
-        await asyncio.sleep(self.settings.post_join_delay_seconds)
         self.logger.info("join_succeeded")
 
     async def close(self) -> None:

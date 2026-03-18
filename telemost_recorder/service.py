@@ -18,6 +18,7 @@ from telemost_recorder.pulse_audio import ChromiumAudioSink
 from telemost_recorder.recording import (
     FfmpegRecorder,
     RecordingError,
+    probe_recording_duration_seconds,
     run_preflight_capture,
 )
 from telemost_recorder.session_lock import SessionFileLock
@@ -147,6 +148,7 @@ class TelemostService:
                     trigger,
                     output_path,
                 )
+                await self._delete_silence_only_recording(output_path, stop_reason=stop_reason)
             finally:
                 try:
                     if recorder is not None:
@@ -162,6 +164,41 @@ class TelemostService:
     def _build_output_path(self) -> Path:
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         return self.settings.recordings_dir_resolved / f"telemost-{timestamp}.m4a"
+
+    async def _delete_silence_only_recording(self, output_path: Path, *, stop_reason: str) -> None:
+        if stop_reason != "silence_timeout" or not output_path.exists():
+            return
+
+        try:
+            duration_seconds = await probe_recording_duration_seconds(output_path)
+        except RecordingError as exc:
+            self.logger.warning(
+                "recording_cleanup_skipped reason=duration_probe_failed output=%s error=%s",
+                output_path,
+                exc,
+            )
+            return
+
+        silence_only_threshold_seconds = self.settings.silence_timeout_seconds + 5
+        if duration_seconds >= silence_only_threshold_seconds:
+            return
+
+        try:
+            output_path.unlink(missing_ok=True)
+        except OSError as exc:
+            self.logger.warning(
+                "recording_cleanup_skipped reason=unlink_failed output=%s error=%s",
+                output_path,
+                exc,
+            )
+            return
+
+        self.logger.info(
+            "recording_deleted reason=silence_only duration_seconds=%.3f threshold_seconds=%s output=%s",
+            duration_seconds,
+            silence_only_threshold_seconds,
+            output_path,
+        )
 
     def _install_signal_handlers(self) -> None:
         if self._signal_handlers_installed:
@@ -218,6 +255,8 @@ class TelemostService:
             )
         if shutil.which("ffmpeg") is None:
             raise FileNotFoundError("ffmpeg binary is not available in PATH")
+        if shutil.which("ffprobe") is None:
+            raise FileNotFoundError("ffprobe binary is not available in PATH")
         if shutil.which("pactl") is None:
             raise FileNotFoundError("pactl binary is not available in PATH")
 

@@ -234,3 +234,33 @@ async def run_preflight_capture(settings: Settings, audio_source: str) -> None:
         message = stderr.decode("utf-8", errors="replace").strip()
         raise RecordingError(f"ffmpeg preflight failed: {message}")
     logger.info("preflight_capture_ok")
+
+
+async def probe_recording_duration_seconds(output_path: Path) -> float:
+    if shutil.which("ffprobe") is None:
+        raise RecordingError("ffprobe binary is not available in PATH")
+
+    process = await asyncio.create_subprocess_exec(
+        "ffprobe",
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        str(output_path),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await process.communicate()
+    if process.returncode != 0:
+        message = stderr.decode("utf-8", errors="replace").strip()
+        raise RecordingError(f"ffprobe failed for {output_path}: {message or 'unknown error'}")
+
+    duration_raw = stdout.decode("utf-8", errors="replace").strip()
+    try:
+        return float(duration_raw)
+    except ValueError as exc:
+        raise RecordingError(
+            f"ffprobe returned unexpected duration for {output_path}: {duration_raw!r}"
+        ) from exc

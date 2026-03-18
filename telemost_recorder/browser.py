@@ -16,6 +16,7 @@ from playwright.async_api import (
 )
 
 from telemost_recorder.config import Settings
+from telemost_recorder.display import VirtualDisplaySession
 
 
 class BrowserAutomationError(RuntimeError):
@@ -29,11 +30,13 @@ class TelemostBrowserSession:
         self._playwright: Playwright | None = None
         self._context: BrowserContext | None = None
         self._page: Page | None = None
+        self._display = VirtualDisplaySession(settings)
         self._browser_env = browser_env or os.environ.copy()
 
     async def start(self) -> None:
         self.settings.chromium_profile_dir_resolved.mkdir(parents=True, exist_ok=True)
         self._playwright = await async_playwright().start()
+        browser_env = await self._display.prepare_env(self._browser_env)
         self._context = await self._playwright.chromium.launch_persistent_context(
             user_data_dir=str(self.settings.chromium_profile_dir_resolved),
             executable_path=str(self.settings.chromium_path),
@@ -43,14 +46,19 @@ class TelemostBrowserSession:
             handle_sigterm=False,
             handle_sighup=False,
             timeout=self.settings.browser_launch_timeout_seconds * 1000,
-            env=self._browser_env,
+            env=browser_env,
             args=self._build_browser_args(),
         )
         self._context.set_default_timeout(self.settings.join_timeout_seconds * 1000)
         origin = _origin_from_url(self.settings.url)
         await self._context.grant_permissions(["camera", "microphone"], origin=origin)
         self._page = self._context.pages[0] if self._context.pages else await self._context.new_page()
-        await self._page.bring_to_front()
+        self.logger.info(
+            "browser_started headless=false display=%s window=%sx%s",
+            browser_env.get("DISPLAY", "<none>"),
+            self.settings.window_width,
+            self.settings.window_height,
+        )
 
     async def join_meeting(self) -> None:
         page = self.page
@@ -66,13 +74,16 @@ class TelemostBrowserSession:
         self.logger.info("join_succeeded")
 
     async def close(self) -> None:
-        if self._context is not None:
-            await self._context.close()
-            self._context = None
-        if self._playwright is not None:
-            await self._playwright.stop()
-            self._playwright = None
-        self._page = None
+        try:
+            if self._context is not None:
+                await self._context.close()
+                self._context = None
+            if self._playwright is not None:
+                await self._playwright.stop()
+                self._playwright = None
+        finally:
+            await self._display.close()
+            self._page = None
 
     @property
     def page(self) -> Page:
@@ -83,7 +94,6 @@ class TelemostBrowserSession:
     def _build_browser_args(self) -> list[str]:
         return [
             f"--window-size={self.settings.window_width},{self.settings.window_height}",
-            f"--window-position={self.settings.window_x},{self.settings.window_y}",
             "--disable-notifications",
             "--autoplay-policy=no-user-gesture-required",
             "--disable-default-apps",
@@ -92,7 +102,6 @@ class TelemostBrowserSession:
             "--no-first-run",
             "--password-store=basic",
             "--use-fake-ui-for-media-stream",
-            "--ozone-platform=x11",
         ]
 
     async def _wait_for_page_settle(self) -> None:

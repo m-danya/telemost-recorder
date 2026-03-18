@@ -27,20 +27,19 @@ class Settings(BaseSettings):
     url: str
     display_name: str
     schedule: str
-    recordings_dir: Path
-    audio_backend: Literal["pulse"]
-    audio_sink_name: str = Field(min_length=1)
-    window_size: str
-    window_position: str
-    silence_timeout_seconds: int
-    silence_min_detect_seconds: int
-    silence_noise_db: float
-    chromium_path: Path
-    chromium_profile_dir: Path
-    browser_launch_timeout_seconds: int
-    join_timeout_seconds: int
-    post_join_delay_seconds: int
-    ffmpeg_loglevel: Literal["error", "warning", "info"]
+    recordings_dir: Path = Path("recordings")
+    audio_backend: Literal["pulse"] = "pulse"
+    audio_sink_name: str = Field(default="telemost_recorder", min_length=1)
+    window_size: str = "1600x900"
+    silence_timeout_seconds: int = 120
+    silence_min_detect_seconds: int = 1
+    silence_noise_db: float = -45
+    chromium_path: Path = Path("/usr/bin/chromium-browser")
+    chromium_profile_dir: Path = Path(".telemost-recorder-profile")
+    browser_launch_timeout_seconds: int = 60
+    join_timeout_seconds: int = 90
+    post_join_delay_seconds: int = 5
+    ffmpeg_loglevel: Literal["error", "warning", "info"] = "info"
 
     @field_validator("audio_sink_name")
     @classmethod
@@ -65,16 +64,6 @@ class Settings(BaseSettings):
         return height
 
     @property
-    def window_x(self) -> int:
-        x, _ = self._parse_window_position()
-        return x
-
-    @property
-    def window_y(self) -> int:
-        _, y = self._parse_window_position()
-        return y
-
-    @property
     def recordings_dir_resolved(self) -> Path:
         return self.recordings_dir.expanduser().resolve()
 
@@ -94,9 +83,3 @@ class Settings(BaseSettings):
         if width <= 0 or height <= 0:
             raise ValueError("window size must be positive")
         return width, height
-
-    def _parse_window_position(self) -> tuple[int, int]:
-        parts = self.window_position.split(",")
-        if len(parts) != 2:
-            raise ValueError(f"invalid window position: {self.window_position!r}")
-        return int(parts[0]), int(parts[1])

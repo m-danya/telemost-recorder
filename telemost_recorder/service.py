@@ -129,12 +129,15 @@ class TelemostService:
         _ = self.settings.schedule_times
         _ = self.settings.window_width
         _ = self.settings.window_height
-        _ = self.settings.window_x
-        _ = self.settings.window_y
         if not self.settings.chromium_path.is_file():
             raise FileNotFoundError(f"chromium not found: {self.settings.chromium_path}")
         if not os.access(self.settings.chromium_path, os.X_OK):
             raise PermissionError(f"chromium is not executable: {self.settings.chromium_path}")
+        if "DISPLAY" not in os.environ and shutil.which("Xvfb") is None:
+            raise FileNotFoundError(
+                "DISPLAY is not set and Xvfb binary is not available in PATH; "
+                "install Xvfb for headless console usage"
+            )
         if shutil.which("ffmpeg") is None:
             raise FileNotFoundError("ffmpeg binary is not available in PATH")
         if shutil.which("pactl") is None:

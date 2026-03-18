@@ -7,6 +7,7 @@ import shutil
 import signal
 from datetime import datetime
 from pathlib import Path
+from types import TracebackType
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -19,6 +20,7 @@ from telemost_recorder.recording import (
     RecordingError,
     run_preflight_capture,
 )
+from telemost_recorder.session_lock import SessionFileLock
 
 
 class TelemostService:
@@ -30,6 +32,9 @@ class TelemostService:
         self._active_session_done = asyncio.Event()
         self._active_session_done.set()
         self._signal_handlers_installed = False
+        self._manual_trigger_enabled = False
+        self._session_requested = False
+        self._background_tasks: set[asyncio.Task[None]] = set()
 
     async def run(self) -> None:
         self._install_signal_handlers()
@@ -46,16 +51,21 @@ class TelemostService:
                 replace_existing=True,
             )
         scheduler.start()
+        self._manual_trigger_enabled = True
         self.logger.info("scheduler_started schedule=%s", self.settings.schedule)
-        await self._shutdown_event.wait()
-        self.logger.info("shutdown_requested")
-        scheduler.shutdown(wait=False)
-        await self._wait_for_active_session_to_finish()
+        try:
+            await self._shutdown_event.wait()
+            self.logger.info("shutdown_requested")
+        finally:
+            self._manual_trigger_enabled = False
+            scheduler.shutdown(wait=False)
+            await self._wait_for_active_session_to_finish()
+            await self._wait_for_background_tasks()
 
     async def run_once(self) -> None:
         self._install_signal_handlers()
         await self.check_environment()
-        await self._run_single_session()
+        await self._request_session(trigger="once")
 
     async def check_environment(self) -> None:
         self._validate_binaries()
@@ -73,42 +83,78 @@ class TelemostService:
         self.logger.info("preflight_ok")
 
     async def _run_job_if_idle(self) -> None:
-        if self._recording_lock.locked():
-            self.logger.warning("job_skipped reason=active_session")
-            return
-        await self._run_single_session()
+        await self._request_session(trigger="scheduled")
 
-    async def _run_single_session(self) -> None:
+    async def _request_session(self, *, trigger: str) -> None:
+        if self._shutdown_event.is_set():
+            self.logger.info("session_skipped reason=shutdown_requested trigger=%s", trigger)
+            return
+        if self._session_requested:
+            self.logger.warning("session_skipped reason=active_session trigger=%s", trigger)
+            return
+
+        self._session_requested = True
+        try:
+            await self._run_single_session(trigger=trigger)
+        finally:
+            self._session_requested = False
+
+    async def _run_single_session(self, *, trigger: str) -> None:
         async with self._recording_lock:
             self._active_session_done.clear()
-            output_path = self._build_output_path()
+            session_lock = SessionFileLock(self.settings.session_lock_path)
             audio_sink = ChromiumAudioSink(self.settings)
             browser = TelemostBrowserSession(self.settings, browser_env=audio_sink.browser_env)
             recorder: FfmpegRecorder | None = None
             stop_reason = "failed"
             try:
-                if self._shutdown_event.is_set():
-                    self.logger.info("session_skipped reason=shutdown_requested")
+                if not session_lock.acquire(trigger=trigger):
+                    self.logger.warning(
+                        "session_skipped reason=lock_held trigger=%s lock=%s",
+                        trigger,
+                        self.settings.session_lock_path,
+                    )
                     return
+                if self._shutdown_event.is_set():
+                    self.logger.info("session_skipped reason=shutdown_requested trigger=%s", trigger)
+                    return
+                output_path = self._build_output_path()
+                self.logger.info("session_started trigger=%s output=%s", trigger, output_path)
                 await audio_sink.start()
                 await browser.start()
                 if self._shutdown_event.is_set():
-                    self.logger.info("session_cancelled reason=shutdown_requested stage=browser_started")
+                    self.logger.info(
+                        "session_cancelled reason=shutdown_requested trigger=%s stage=browser_started",
+                        trigger,
+                    )
                     return
                 await browser.join_meeting()
                 if self._shutdown_event.is_set():
-                    self.logger.info("session_cancelled reason=shutdown_requested stage=joined")
+                    self.logger.info(
+                        "session_cancelled reason=shutdown_requested trigger=%s stage=joined",
+                        trigger,
+                    )
                     return
                 recorder = FfmpegRecorder(self.settings, audio_sink.monitor_source)
                 await recorder.start(output_path)
                 stop_reason = await self._wait_for_recording_or_shutdown(recorder)
-                self.logger.info("recording_stopped reason=%s output=%s", stop_reason, output_path)
+                self.logger.info(
+                    "recording_stopped reason=%s trigger=%s output=%s",
+                    stop_reason,
+                    trigger,
+                    output_path,
+                )
             finally:
-                if recorder is not None:
-                    await recorder.stop()
-                await browser.close()
-                await audio_sink.close()
-                self._active_session_done.set()
+                try:
+                    if recorder is not None:
+                        await recorder.stop()
+                    await browser.close()
+                    await audio_sink.close()
+                finally:
+                    try:
+                        session_lock.release()
+                    finally:
+                        self._active_session_done.set()
 
     def _build_output_path(self) -> Path:
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -123,7 +169,24 @@ class TelemostService:
                 loop.add_signal_handler(sig, self._shutdown_event.set)
             except NotImplementedError:
                 return
+        try:
+            loop.add_signal_handler(signal.SIGUSR1, self._handle_manual_trigger_signal)
+        except (AttributeError, NotImplementedError):
+            pass
         self._signal_handlers_installed = True
+
+    def _handle_manual_trigger_signal(self) -> None:
+        if not self._manual_trigger_enabled:
+            self.logger.info("manual_trigger_ignored reason=service_not_ready")
+            return
+        if self._shutdown_event.is_set():
+            self.logger.info("manual_trigger_skipped reason=shutdown_requested")
+            return
+        self.logger.info("manual_trigger_received")
+        task = asyncio.create_task(self._request_session(trigger="manual"))
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+        task.add_done_callback(self._log_background_task_failure)
 
     def _validate_binaries(self) -> None:
         _ = self.settings.schedule_times
@@ -148,6 +211,24 @@ class TelemostService:
             return
         self.logger.info("waiting_for_active_session_to_finish")
         await self._active_session_done.wait()
+
+    async def _wait_for_background_tasks(self) -> None:
+        if not self._background_tasks:
+            return
+        await asyncio.gather(*list(self._background_tasks), return_exceptions=True)
+
+    def _log_background_task_failure(self, task: asyncio.Task[None]) -> None:
+        if task.cancelled():
+            return
+        exception = task.exception()
+        if exception is None:
+            return
+        exc_info: tuple[type[BaseException], BaseException, TracebackType | None] = (
+            type(exception),
+            exception,
+            exception.__traceback__,
+        )
+        self.logger.error("background_task_failed", exc_info=exc_info)
 
     async def _wait_for_recording_or_shutdown(self, recorder: FfmpegRecorder) -> str:
         recording_task = asyncio.create_task(recorder.wait_until_stop_condition())

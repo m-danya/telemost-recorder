@@ -8,6 +8,7 @@ SYSTEMD_USER_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 LOCAL_BIN_DIR="$HOME/.local/bin"
 UNIT_PATH="$SYSTEMD_USER_DIR/$SERVICE_NAME"
 LAUNCHER_PATH="$LOCAL_BIN_DIR/telemost-recorder-monitoring-service"
+TRIGGER_PATH="$LOCAL_BIN_DIR/telemost-recorder-trigger"
 
 require_command() {
     local command_name="$1"
@@ -29,6 +30,19 @@ write_launcher() {
     } > "$LAUNCHER_PATH"
 
     chmod 0755 "$LAUNCHER_PATH"
+}
+
+write_trigger_launcher() {
+    local uv_bin="$1"
+
+    {
+        printf '%s\n' '#!/usr/bin/env bash'
+        printf '%s\n' 'set -euo pipefail'
+        printf 'export PATH=%q\n' "$PATH"
+        printf 'exec %q run --project %q telemost-recorder trigger\n' "$uv_bin" "$PROJECT_DIR"
+    } > "$TRIGGER_PATH"
+
+    chmod 0755 "$TRIGGER_PATH"
 }
 
 write_unit() {
@@ -54,6 +68,7 @@ mkdir -p "$SYSTEMD_USER_DIR" "$LOCAL_BIN_DIR"
 
 UV_BIN="$(command -v uv)"
 write_launcher "$UV_BIN"
+write_trigger_launcher "$UV_BIN"
 write_unit
 
 systemctl --user daemon-reload
@@ -71,6 +86,7 @@ Project directory: $PROJECT_DIR
 Service working directory: $CALLER_DIR
 Unit file: $UNIT_PATH
 Launcher: $LAUNCHER_PATH
+Trigger helper: $TRIGGER_PATH
 
 The service reads .env and relative paths like recordings/ from:
   $CALLER_DIR
@@ -78,4 +94,5 @@ The service reads .env and relative paths like recordings/ from:
 Useful commands:
   systemctl --user status $SERVICE_NAME
   journalctl --user -u $SERVICE_NAME -f
+  telemost-recorder-trigger
 EOF

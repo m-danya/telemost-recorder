@@ -72,6 +72,14 @@ class Settings(BaseSettings):
         return self.chromium_profile_dir.expanduser().resolve()
 
     @property
+    def working_dir_resolved(self) -> Path:
+        return Path.cwd().resolve()
+
+    @property
+    def session_lock_path(self) -> Path:
+        return self.working_dir_resolved / ".telemost-recorder-session.lock"
+
+    @property
     def silence_noise_spec(self) -> str:
         return f"{self.silence_noise_db}dB"
 

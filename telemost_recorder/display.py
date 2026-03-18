@@ -22,7 +22,7 @@ class VirtualDisplaySession:
 
     async def prepare_env(self, browser_env: dict[str, str]) -> dict[str, str]:
         if browser_env.get("DISPLAY"):
-            return browser_env
+            return self._prepare_x11_env(browser_env, display=browser_env["DISPLAY"])
         if shutil.which("Xvfb") is None:
             raise DisplayServerError(
                 "DISPLAY is not set and Xvfb is not available in PATH; "
@@ -56,8 +56,7 @@ class VirtualDisplaySession:
 
         self._display = f":{display_number}"
         self._stderr_task = asyncio.create_task(self._consume_stderr())
-        prepared_env = browser_env.copy()
-        prepared_env["DISPLAY"] = self._display
+        prepared_env = self._prepare_x11_env(browser_env, display=self._display)
         self.logger.info(
             "virtual_display_started display=%s screen=%sx%s",
             self._display,
@@ -98,3 +97,12 @@ class VirtualDisplaySession:
             return ""
         stderr = await self._process.stderr.read()
         return stderr.decode("utf-8", errors="replace").strip()
+
+    def _prepare_x11_env(self, browser_env: dict[str, str], *, display: str) -> dict[str, str]:
+        prepared_env = browser_env.copy()
+        prepared_env["DISPLAY"] = display
+        prepared_env["XDG_SESSION_TYPE"] = "x11"
+        prepared_env["OZONE_PLATFORM"] = "x11"
+        prepared_env.pop("WAYLAND_DISPLAY", None)
+        prepared_env.pop("WAYLAND_SOCKET", None)
+        return prepared_env

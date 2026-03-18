@@ -94,6 +94,7 @@ class TelemostBrowserSession:
     def _build_browser_args(self) -> list[str]:
         return [
             f"--window-size={self.settings.window_width},{self.settings.window_height}",
+            "--ozone-platform=x11",
             "--disable-notifications",
             "--autoplay-policy=no-user-gesture-required",
             "--disable-default-apps",
